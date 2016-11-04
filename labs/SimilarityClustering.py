@@ -28,6 +28,7 @@ from gensim.models import Word2Vec
 import gensim.models.doc2vec
 from collections import OrderedDict
 from gensim.models.doc2vec import LabeledSentence
+import articles_data
 
 import multiprocessing
 from gensim.test.test_doc2vec import ConcatenatedDoc2Vec
@@ -90,7 +91,7 @@ class SimilarityClustering:
         self.times_["preprocessing"]["end"] = time()
     
     
-    def doc_train(self, w2v_path="../datastore/sejongcorpus_w2v2.p", alpha=0.025, min_alpha=0.001, passes=20):
+    def doc_train(self, w2v_path, alpha=0.025, min_alpha=0.001, passes=20):
         self.times_["learning"]["start"] = time()
         
         ## make doc2vec models
@@ -144,7 +145,25 @@ class SimilarityClustering:
     def clustering(self, threshold=0.8):
         self.times_["clustering"]["start"] = time()
         print("Similarity clustering.....")
-        self.centers_ = du.similarity_clustering(self.df_, self.dm_.docvecs, threshold)
+        self.centers_, clusters = du.similarity_clustering(self.df_, self.dm_.docvecs, threshold)
+        self.df_['cluster'] = clusters
+        du.calc_similarity(self.df_, self.dm_.docvecs, self.centers_)
+        print("Complete to similarity clustering.")
+        self.times_["clustering"]["end"] = time()
+        
+        
+    def clustering_cate(self, threshold=0.8):
+        self.times_["clustering"]["start"] = time()
+        print("Similarity clustering.....")
+        cates = articles_data.get_target_cate()
+        centers = {}
+        clusters = []
+        for cate in cates:
+            center, cluster = du.similarity_clustering(self.df_[self.df_.cate==cate], self.dm_.docvecs, threshold)
+            centers.update(center)
+            clusters.append(cluster)    
+        self.centers_ = centers
+        self.df_['cluster'] = pd.concat(clusters, axis=0)
         du.calc_similarity(self.df_, self.dm_.docvecs, self.centers_)
         print("Complete to similarity clustering.")
         self.times_["clustering"]["end"] = time()
@@ -172,7 +191,8 @@ class SimilarityClustering:
         
     def calc_elapsed(self):
         for key, value in self.times_.iteritems():
-            value["elapsed"]= value["end"] - value["start"]
+            if 'end' in value:
+                value["elapsed"]= value["end"] - value["start"]
             
             
     def save(self, path, prefix):
@@ -193,7 +213,7 @@ class SimilarityClustering:
         self.models_by_name_['dbow+dmc'] = ConcatenatedDoc2Vec([self.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'], self.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)']])
 
         
-    def s_load(path, prefix):
+    def s_load(path, prefix, only_d2v=False):
         sc = SimilarityClustering()
         
         sc.models_by_name_ = OrderedDict()
@@ -207,24 +227,38 @@ class SimilarityClustering:
         
         sc.df_ = pd.read_pickle("%s/%sdf.p" % (path, prefix))
         
-        sc.centers_ = pickle.load(open("%s/%scenters.p" % (path, prefix), "rb"))
-        sc.topics_ = pickle.load(open("%s/%stopics.p" % (path, prefix), "rb"))
-        sc.times_ = pickle.load(open("%s/%stimes.p" % (path, prefix), "rb"))
+        if not(only_d2v):
+            sc.centers_ = pickle.load(open("%s/%scenters.p" % (path, prefix), "rb"))
+            sc.topics_ = pickle.load(open("%s/%stopics.p" % (path, prefix), "rb"))
+            sc.times_ = pickle.load(open("%s/%stimes.p" % (path, prefix), "rb"))
 
-        sc.iner_score()
+            sc.iner_score()
         
         return sc
     load=staticmethod(s_load)
     
-    def print_clusters(size, top=10):
+    def print_clusters(self, top=10):
         for idx, row in self.countby_.sort_values('cohesion', ascending=False)[:top].iterrows():
             print du.test_print(row.cluster, self.df_, self.dm_.docvecs, self.centers_, self.topics_, self.countby_)
-            print "\n------------------------------------------------------------\n"
+            print "------------------------------------------------------------"
+            
+
+    def print_topics(self, top=10):
+        for idx, row in self.countby_.sort_values('cohesion', ascending=False)[:top].iterrows():
+            du.topic_print(self.topics_[row.cluster])
+            print "------------------------------------------------------------"
             
             
-    def train(self, train_df, path, prefix,
+    def print_centers(self, top=10):
+        cnt = 1
+        for idx, row in self.countby_.sort_values('cohesion', ascending=False)[:top].iterrows():
+            print cnt,  self.df_.loc[self.dm_.docvecs.most_similar([self.centers_[row.cluster]])[0][0]].title
+            cnt = cnt + 1
+            
+            
+    def train(self, typ, w2v_path, train_df, path, prefix,
               tokenizer=cn.tokenize, 
-              w2v_path="../datastore/sejongcorpus_w2v2.p", alpha=0.025, min_alpha=0.001, passes=20,
+              alpha=0.025, min_alpha=0.001, passes=20,
               model_name='Doc2Vec(dm/c,d100,n5,w5,mc2,t8)', 
               threshold=0.8, 
               cnt_threshold=10, 
@@ -234,11 +268,37 @@ class SimilarityClustering:
         self.tokenize(cn.tokenize)
         self.doc_train(w2v_path, alpha, min_alpha, passes)
         self.select_model(model_name)
-        self.clustering(threshold)
+        cluster_train(typ, path, prefix, threshold, cnt_threshold, get_topic_func)
+    
+    
+    def cluster_train(self, typ, path, prefix,
+              threshold=0.8, 
+              cnt_threshold=10, 
+              get_topic_func=du.get_all_topics
+             ):
+        if(typ=='cate'):
+            self.clustering_cate(threshold)
+        else:
+            self.clustering(threshold)
         self.iner_score(cnt_threshold)
         self.get_all_topics(get_topic_func)
         self.calc_elapsed()
         self.save(path, prefix)
+        
             
+    def save_to_db(self, prefix, columns, collection):
+        df = self.df_[:]
+        df = df[columns]
+        
+        prefix = prefix * 1000
+        clusters_dict = {}
+        for idx, val in enumerate(df.cluster.unique()):
+            clusters_dict[val] = prefix + idx
             
-#     def save_to_db(db):
+        df['cluster'] = [clusters_dict[row['cluster']] for idx, row in df.iterrows()]
+
+        documents = []
+        for idx, row in df.iterrows():
+            documents.append(row.to_dict())
+            
+        collection.insert_many(documents)

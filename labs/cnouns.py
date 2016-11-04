@@ -49,15 +49,20 @@ def text_cleaning(text):
     return text
 
 def tokenize(inp_str):
+    return ' '.join(tokenize_arr(inp_str))
+
+def tokenize_arr(inp_str):
     clean_text = text_cleaning(inp_str)
     pos_tags = mecab.pos(clean_text)
-    cns = ' '.join(e for e in extract_all_compound_nouns(pos_tags, 3))
-    morphs = ' '.join(e for e in morphs_ngrams(pos_tags, 3))
+    cns = extract_all_compound_nouns(pos_tags, 3)
+    morphs = morphs_ngrams(pos_tags, 3)
     return cns + morphs
 
 def tokenize_nouns(inp_str):
+    return ' '.join(tokenize_nouns_arr(inp_str))
+
+def tokenize_nouns_arr(inp_str):
     clean_text = text_cleaning(inp_str)
     pos_tags = mecab.pos(clean_text)
-#    nouns = ' '.join(e for e in mecab.nouns(clean_text))
-    cns = ' '.join(e for e in extract_all_compound_nouns(pos_tags, 3))
+    cns = extract_all_compound_nouns(pos_tags, 3)
     return cns

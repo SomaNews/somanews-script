@@ -13,14 +13,14 @@ from gensim import corpora, models
 def test_print(cluster, df, docvecs, centers, topics, score):
     print(score[score.cluster==cluster])
     print("")
-    print("Most similar -", df.loc[docvecs.most_similar([centers[cluster]])[0][0]].title)
-    print("")
+    print "Most similar -", df.loc[docvecs.most_similar([centers[cluster]])[0][0]].title
+    print("") 
     topic_print(topics[cluster])
     print("")
     clusters = df[df.cluster==cluster]
     clusters = clusters[['title','similarity']]
     for idx, row in clusters.sort_values('similarity', ascending=False).iterrows():
-        print(row['similarity'], idx, row['title'])
+        print row['similarity'], idx, row['title']
 
 ## topics
 def get_all_topics(df, clusters, num_topics=3, num_words=3):
@@ -80,7 +80,8 @@ def similarity_iner_score(centers, df, docvecs):
 
     return pd.DataFrame(scores, columns = ['cluster', 'cnt', 'distance', 'variance', 'similarity', 'cohesion'])
 
-def similarity_clustering(df, docvecs, threshold=0.5):
+def similarity_clustering(df_, docvecs, threshold=0.5):
+    df = df_[:]
     t0 = time()
     # Initialize
     df['rank'] = np.zeros(len(df))
@@ -92,7 +93,7 @@ def similarity_clustering(df, docvecs, threshold=0.5):
         
     # Calculate similarity
     print("Calculate similarity. size:%d"%len(df))
-    for t in itertools.combinations(range(len(df)), 2):
+    for t in itertools.combinations(df.index, 2):
         similarity = docvecs.similarity(d1=t[0], d2=t[1])
         if(similarity >= threshold):
             sd[t] = similarity
@@ -109,10 +110,10 @@ def similarity_clustering(df, docvecs, threshold=0.5):
     
     for key, similarity in ordered_sd.items()[:-1]:
         cnt = cnt + 1
-        tmp = int(1000 * cnt / size)
+        tmp = int(100 * cnt / size)
         if(per + 1 == tmp): 
             per = per + 1
-            print("progress - %d / 1000" % per)
+            print("progress - %d / 100" % per)
         u_cluster = find(df, key[0])
         v_cluster = find(df, key[1])
         vec_sim = cs_similarity(centers[u_cluster], centers[v_cluster])
@@ -124,7 +125,7 @@ def similarity_clustering(df, docvecs, threshold=0.5):
         find(df, idx)
             
     print("Done in %0.3fs." % (time() - t0))
-    return centers
+    return centers, df.cluster
     
 # cosine
 def cs_similarity(v1, v2, n = 100):

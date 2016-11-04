@@ -2,15 +2,21 @@
 
 import numpy as np
 import pandas as pd
-from pymongo import MongoClient
 import datetime
+from gensim.models import Word2Vec
+import cnouns as cn
+import cPickle as pickle
+from multiprocessing import Pool
+from time import time
+import os
 
-def find_recent_articles(collection_name='articles'):
-    client = MongoClient('mongodb://localhost:27017/somanews')
-    db = client.get_database('somanews')
-    articles = db.get_collection(collection_name)
+def get_target_cate():
+    return [u"정치", u"사회", u"과학", u"경제"]
 
-    categories = pd.read_pickle('../datastore/category2.p')
+def find_recent_articles(collection, catelist_path):
+    articles = collection
+
+    categories = pd.read_pickle(catelist_path)
 
     article_list = []
     d = datetime.datetime.now() - datetime.timedelta(days=7)
@@ -29,6 +35,52 @@ def find_recent_articles(collection_name='articles'):
             new_categories.append('none')
 
     articles_df['cate'] = new_categories
-    target_list = [u"정치", u"사회", u"과학", u"경제"]
+    target_list = get_target_cate()
     
     return articles_df[articles_df['cate'].isin(target_list)]
+
+class Sentences(object):
+    def __init__(self, dirname):
+        self.dirname = dirname
+ 
+    def __iter__(self):
+        for fname in os.listdir(self.dirname)[:50]:
+            for line in open(os.path.join(self.dirname, fname)):
+                yield line.split()
+                                
+def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4, tokenize=cn.tokenize):
+    articles = collection.find()
+    
+    articles_list = []
+    for article in articles:
+        articles_list.append(article)
+    articles_df = pd.DataFrame.from_dict(articles_list)
+    print("Number of articles - %d" % len(articles_df))
+    
+    corpus_df = pd.read_pickle(corpus_path)
+    print("Number of corpus - %d" % len(corpus_df))
+    
+    corpus_words = [row[1] for row in corpus_df.iteritems()]
+    articles_words = [aricle['title'] + ' ' + aricle['content'] for idx, aricle in articles_df.iterrows()]
+    words = corpus_words + articles_words
+    corpus_words = []
+    articles_words = []
+    print("Number of words - %d" % len(words))
+    
+    batchs = [words[i:i + batch_size] for i in xrange(0, len(words), batch_size)]
+    print("Number of batchs - %d" % len(batchs))
+    
+    # p = Pool(1)
+    for idx, batch in enumerate(batchs):
+        t0 = time()
+        # tokens = p.map(tokenize, batch)
+        tokens = [tokenize(b) for b in batch]
+        f = open("%s/%d"%(target_dir, idx), "w")
+        f.write("\n".join(tokens).encode('utf8'))
+        f.close()
+        print("Batch#%d - tokenize took %f sec"%(idx, time() - t0))
+        
+def trainWord2Vec(src, dest):
+    sentences = Sentences(src)
+    w2v = Word2Vec(sentences)
+    w2v.save_word2vec_format(dest)
