@@ -294,7 +294,6 @@ class SimilarityClustering:
         clusters = []
 
         time = datetime.datetime.now()
-        df = self.df_.drop(['target_str'], axis=1)
         clusters_infors = self.countby_.sort_values('cohesion', ascending=False)
 
         prefix = prefix * 1000
@@ -302,10 +301,9 @@ class SimilarityClustering:
         for idx, info in clusters_infors.iterrows():
             new_cluster = prefix + idx
             leading = self.getMainArticle(info.cluster).to_dict()
-            del leading['target_str']
             
             articles = []
-            for idx, row in df[df.cluster==info.cluster].iterrows():
+            for idx, row in self.df_[self.df_.cluster==info.cluster].iterrows():
                 row_dict = row.to_dict()
                 row_dict['cluster'] = new_cluster
                 articles.append(row_dict)

@@ -40,11 +40,12 @@ def find_recent_articles(collection, catelist_path):
     return articles_df[articles_df['cate'].isin(target_list)]
 
 class Sentences(object):
-    def __init__(self, dirname):
+    def __init__(self, dirname, size):
         self.dirname = dirname
+        self.size = size
  
     def __iter__(self):
-        for fname in os.listdir(self.dirname)[:50]:
+        for fname in os.listdir(self.dirname)[:self.size]:
             for line in open(os.path.join(self.dirname, fname)):
                 yield line.split()
                                 
@@ -80,7 +81,9 @@ def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4,
         f.close()
         print("Batch#%d - tokenize took %f sec"%(idx, time() - t0))
         
-def trainWord2Vec(src, dest):
-    sentences = Sentences(src)
+    return len(batchs)
+        
+def trainWord2Vec(src, dest, size=50):
+    sentences = Sentences(src, size)
     w2v = Word2Vec(sentences)
     w2v.save_word2vec_format(dest)
