@@ -29,6 +29,7 @@ import gensim.models.doc2vec
 from collections import OrderedDict
 from gensim.models.doc2vec import LabeledSentence
 import articles_data
+import datetime 
 
 import multiprocessing
 from gensim.test.test_doc2vec import ConcatenatedDoc2Vec
@@ -88,6 +89,7 @@ class SimilarityClustering:
             split = ['train','test','extra','extra'][tmp]  # 25k train, 25k test, 25k extra
             self.alldocs_.append(Articles(words, tags, split))
             
+        self.df_.drop(['target_str'], axis=1, inplace=True)
         self.times_["preprocessing"]["end"] = time()
     
     
@@ -255,6 +257,8 @@ class SimilarityClustering:
             print cnt,  self.df_.loc[self.dm_.docvecs.most_similar([self.centers_[row.cluster]])[0][0]].title
             cnt = cnt + 1
             
+    def getMainArticle(self, cluster):
+        return self.df_.loc[self.dm_.docvecs.most_similar([self.centers_[cluster]])[0][0]]
             
     def train(self, typ, w2v_path, train_df, path, prefix,
               tokenizer=cn.tokenize, 
@@ -265,10 +269,10 @@ class SimilarityClustering:
               get_topic_func=du.get_all_topics
              ):
         self.reset(train_df[:])
-        self.tokenize(cn.tokenize)
+        self.tokenize(tokenizer)
         self.doc_train(w2v_path, alpha, min_alpha, passes)
         self.select_model(model_name)
-        cluster_train(typ, path, prefix, threshold, cnt_threshold, get_topic_func)
+        self.cluster_train(typ, path, prefix, threshold, cnt_threshold, get_topic_func)
     
     
     def cluster_train(self, typ, path, prefix,
@@ -286,19 +290,40 @@ class SimilarityClustering:
         self.save(path, prefix)
         
             
-    def save_to_db(self, prefix, columns, collection):
-        df = self.df_[:]
-        df = df[columns]
-        
-        prefix = prefix * 1000
-        clusters_dict = {}
-        for idx, val in enumerate(df.cluster.unique()):
-            clusters_dict[val] = prefix + idx
-            
-        df['cluster'] = [clusters_dict[row['cluster']] for idx, row in df.iterrows()]
+    def save_to_db(self, prefix, collection):
+        clusters = []
 
-        documents = []
-        for idx, row in df.iterrows():
-            documents.append(row.to_dict())
+        time = datetime.datetime.now()
+        df = self.df_.drop(['target_str'], axis=1)
+        clusters_infors = self.countby_.sort_values('cohesion', ascending=False)
+
+        prefix = prefix * 1000
+
+        for idx, info in clusters_infors.iterrows():
+            new_cluster = prefix + idx
+            leading = self.getMainArticle(info.cluster).to_dict()
+            del leading['target_str']
             
-        collection.insert_many(documents)
+            articles = []
+            for idx, row in df[df.cluster==info.cluster].iterrows():
+                row_dict = row.to_dict()
+                row_dict['cluster'] = new_cluster
+                articles.append(row_dict)
+            
+            if(leading['imageURL'] == ''):
+                for article in articles:
+                    if(article['imageURL'] != ''):
+                        leading['imageURL'] = article['imageURL']
+                        break
+            
+            cluster = {
+                "cluster": new_cluster,
+                "cohesion": info.cohesion,
+                "count": info.cnt,
+                "leading": leading,
+                "clusteredAt": time,
+                "articles": articles
+            }
+            clusters.append(cluster)
+            
+        collection.insert_many(clusters)

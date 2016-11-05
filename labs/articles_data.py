@@ -48,7 +48,7 @@ class Sentences(object):
             for line in open(os.path.join(self.dirname, fname)):
                 yield line.split()
                                 
-def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4, tokenize=cn.tokenize):
+def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4, tokenize=cn.pos_tags):
     articles = collection.find()
     
     articles_list = []

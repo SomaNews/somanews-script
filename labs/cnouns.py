@@ -66,3 +66,11 @@ def tokenize_nouns_arr(inp_str):
     pos_tags = mecab.pos(clean_text)
     cns = extract_all_compound_nouns(pos_tags, 3)
     return cns
+
+def pos_tags(inp_str):
+    return ' '.join(pos_tags_arr(inp_str))
+
+def pos_tags_arr(inp_str):
+    clean_text = text_cleaning(inp_str)
+    pos_tags = mecab.pos(clean_text)
+    return [pt[0] + pt[1] for pt in pos_tags]
