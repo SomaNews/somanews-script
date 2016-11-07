@@ -144,24 +144,25 @@ class SimilarityClustering:
         self.dm_ = self.models_by_name_[model_name]
         
         
-    def clustering(self, threshold=0.8):
+    def clustering(self, threshold=0.8, repeat=5):
         self.times_["clustering"]["start"] = time()
         print("Similarity clustering.....")
-        self.centers_, clusters = du.similarity_clustering(self.df_, self.dm_.docvecs, threshold)
+        self.centers_, clusters = du.similarity_clustering(self.df_, self.dm_.docvecs, threshold, repeat)
         self.df_['cluster'] = clusters
         du.calc_similarity(self.df_, self.dm_.docvecs, self.centers_)
         print("Complete to similarity clustering.")
         self.times_["clustering"]["end"] = time()
         
         
-    def clustering_cate(self, threshold=0.8):
+    def clustering_cate(self, threshold=0.8, repeat=5):
         self.times_["clustering"]["start"] = time()
-        print("Similarity clustering.....")
+        print("Similarity cate clustering.....")
         cates = articles_data.get_target_cate()
         centers = {}
         clusters = []
         for cate in cates:
-            center, cluster = du.similarity_clustering(self.df_[self.df_.cate==cate], self.dm_.docvecs, threshold)
+            print("\nClustering category : %s"%cate)
+            center, cluster = du.similarity_clustering(self.df_[self.df_.cate==cate], self.dm_.docvecs, threshold, repeat)
             centers.update(center)
             clusters.append(cluster)    
         self.centers_ = centers
@@ -171,8 +172,8 @@ class SimilarityClustering:
         self.times_["clustering"]["end"] = time()
         
         
-    def iner_score(self, cnt_threshold=10):
-        self.scores_ = du.similarity_iner_score(self.centers_, self.df_, self.dm_.docvecs)
+    def iner_score(self, threshold=0.8, cnt_threshold=10):
+        self.scores_ = du.similarity_iner_score(self.centers_, self.df_, self.dm_.docvecs, threshold)
         size_1 = self.scores_[self.scores_.cnt==1]
         self.countby_ = self.scores_[self.scores_.cnt>cnt_threshold]
         print "total:", len(self.scores_), ", size_1:",len(size_1), ", countby:", len(self.countby_)
@@ -198,15 +199,15 @@ class SimilarityClustering:
             
             
     def save(self, path, prefix):
-        self.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)'].save("%s/%sd2v-dmc.p" % (path, prefix))
-        self.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'].save("%s/%sd2v-dbow.p" % (path, prefix))
-        self.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)'].save("%s/%sd2v-dmm.p" % (path, prefix))
+        self.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)'].save("%s/%s_d2v-dmc.p" % (path, prefix))
+        self.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'].save("%s/%s_d2v-dbow.p" % (path, prefix))
+        self.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)'].save("%s/%s_d2v-dmm.p" % (path, prefix))
 
-        self.df_.to_pickle("%s/%sdf.p" % (path, prefix))
+        self.df_.to_pickle("%s/%s_df.p" % (path, prefix))
         
-        pickle.dump(self.centers_, open("%s/%scenters.p" % (path, prefix), "wb"))
-        pickle.dump(self.topics_, open("%s/%stopics.p" % (path, prefix), "wb"))
-        pickle.dump(self.times_, open("%s/%stimes.p" % (path, prefix), "wb"))
+        pickle.dump(self.centers_, open("%s/%s_centers.p" % (path, prefix), "wb"))
+        pickle.dump(self.topics_, open("%s/%s_topics.p" % (path, prefix), "wb"))
+        pickle.dump(self.times_, open("%s/%s_times.p" % (path, prefix), "wb"))
 
         print("Complete to save model.")
         
@@ -215,47 +216,53 @@ class SimilarityClustering:
         self.models_by_name_['dbow+dmc'] = ConcatenatedDoc2Vec([self.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'], self.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)']])
 
         
-    def s_load(path, prefix, only_d2v=False):
+    def s_load(path, prefix, threshold=0.8, cnt_threshold=10, only_d2v=False):
         sc = SimilarityClustering()
         
         sc.models_by_name_ = OrderedDict()
         
-        sc.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)'] = Doc2Vec.load("%s/%sd2v-dmc.p" % (path, prefix))
-        sc.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'] = Doc2Vec.load("%s/%sd2v-dbow.p" % (path, prefix))
-        sc.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)'] = Doc2Vec.load("%s/%sd2v-dmm.p" % (path, prefix))
+        sc.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)'] = Doc2Vec.load("%s/%s_d2v-dmc.p" % (path, prefix))
+        sc.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'] = Doc2Vec.load("%s/%s_d2v-dbow.p" % (path, prefix))
+        sc.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)'] = Doc2Vec.load("%s/%s_d2v-dmm.p" % (path, prefix))
 
         sc.concat_vec()
         sc.select_model()
         
-        sc.df_ = pd.read_pickle("%s/%sdf.p" % (path, prefix))
+        sc.df_ = pd.read_pickle("%s/%s_df.p" % (path, prefix))
         
         if not(only_d2v):
-            sc.centers_ = pickle.load(open("%s/%scenters.p" % (path, prefix), "rb"))
-            sc.topics_ = pickle.load(open("%s/%stopics.p" % (path, prefix), "rb"))
-            sc.times_ = pickle.load(open("%s/%stimes.p" % (path, prefix), "rb"))
+            sc.centers_ = pickle.load(open("%s/%s_centers.p" % (path, prefix), "rb"))
+            sc.topics_ = pickle.load(open("%s/%s_topics.p" % (path, prefix), "rb"))
+            sc.times_ = pickle.load(open("%s/%s_times.p" % (path, prefix), "rb"))
 
-            sc.iner_score()
+            sc.iner_score(threshold, cnt_threshold)
         
         return sc
     load=staticmethod(s_load)
     
-    def print_clusters(self, top=10):
-        for idx, row in self.countby_.sort_values('cohesion', ascending=False)[:top].iterrows():
-            print du.test_print(row.cluster, self.df_, self.dm_.docvecs, self.centers_, self.topics_, self.countby_)
-            print "------------------------------------------------------------"
+    def print_clusters(self, sortby='cohesion', top=10, threshold=0.8, diff_threshold=0.01):
+        cnt = 0
+        for idx, row in self.countby_.sort_values(sortby, ascending=False)[:top].iterrows():
+            cnt = cnt + 1
+            print(cnt)
+            print du.test_print(row.cluster, self.df_, self.dm_.docvecs, self.centers_, self.topics_, self.countby_, threshold, diff_threshold)
+            print("------------------------------------------------------------")
             
 
-    def print_topics(self, top=10):
-        for idx, row in self.countby_.sort_values('cohesion', ascending=False)[:top].iterrows():
-            du.topic_print(self.topics_[row.cluster])
-            print "------------------------------------------------------------"
-            
-            
-    def print_centers(self, top=10):
-        cnt = 1
-        for idx, row in self.countby_.sort_values('cohesion', ascending=False)[:top].iterrows():
-            print cnt,  self.df_.loc[self.dm_.docvecs.most_similar([self.centers_[row.cluster]])[0][0]].title
+    def print_topics(self, sortby='cohesion', top=10):
+        cnt = 0
+        for idx, row in self.countby_.sort_values(sortby, ascending=False)[:top].iterrows():
             cnt = cnt + 1
+            print(cnt)
+            du.topic_print(self.topics_[row.cluster])
+            print("------------------------------------------------------------")
+            
+            
+    def print_centers(self, sortby='cohesion', top=10):
+        cnt = 0
+        for idx, row in self.countby_.sort_values(sortby, ascending=False)[:top].iterrows():
+            cnt = cnt + 1
+            print cnt,  self.df_.loc[self.dm_.docvecs.most_similar([self.centers_[row.cluster]])[0][0]].title
             
     def getMainArticle(self, cluster):
         return self.df_.loc[self.dm_.docvecs.most_similar([self.centers_[cluster]])[0][0]]
@@ -266,6 +273,7 @@ class SimilarityClustering:
               model_name='Doc2Vec(dm/c,d100,n5,w5,mc2,t8)', 
               threshold=0.8, 
               cnt_threshold=10, 
+              repeat=5,
               get_topic_func=du.get_all_topics
              ):
         self.reset(train_df[:])
@@ -278,16 +286,17 @@ class SimilarityClustering:
     def cluster_train(self, typ, path, prefix,
               threshold=0.8, 
               cnt_threshold=10, 
+              repeat=5,
               get_topic_func=du.get_all_topics
              ):
         if(typ=='cate'):
-            self.clustering_cate(threshold)
+            self.clustering_cate(threshold, repeat)
         else:
-            self.clustering(threshold)
-        self.iner_score(cnt_threshold)
-        self.get_all_topics(get_topic_func)
+            self.clustering(threshold, repeat)
+        self.iner_score(threshold, cnt_threshold)
+#        self.get_all_topics(get_topic_func)#TODO
         self.calc_elapsed()
-        self.save(path, prefix)
+#        self.save(path, prefix)#TODO
         
             
     def save_to_db(self, prefix, collection):

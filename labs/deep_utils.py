@@ -9,18 +9,35 @@ from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
 from gensim.models.ldamodel import LdaModel
 from gensim import corpora, models
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
-def test_print(cluster, df, docvecs, centers, topics, score):
+def test_print(cluster, df, docvecs, centers, topics, score, threshold, diff_threshold):
     print(score[score.cluster==cluster])
     print("")
     print "Most similar -", df.loc[docvecs.most_similar([centers[cluster]])[0][0]].title
     print("") 
-    topic_print(topics[cluster])
+#    topic_print(topics[cluster]) #TODO
     print("")
     clusters = df[df.cluster==cluster]
     clusters = clusters[['title','similarity']]
+    sims = []
     for idx, row in clusters.sort_values('similarity', ascending=False).iterrows():
+        sims.append(row['similarity'])
         print row['similarity'], idx, row['title']
+        
+    margin = 0.001
+    plt.plot(range(len(sims)), sims)
+    plt.axhline(y=threshold, color='r', linestyle='-')
+    plt.ylim(min(sims) - margin, max(sims) + margin)
+    plt.ylabel('Similarity')
+    plt.show()
+    
+    sims_diff = np.absolute(np.diff(np.array(sims)))
+    plt.plot(range(len(sims_diff)), sims_diff)
+    plt.axhline(y=diff_threshold, color='r', linestyle='-')
+    plt.ylabel('Differential')
+    plt.show()
 
 ## topics
 def get_all_topics(df, clusters, num_topics=3, num_words=3):
@@ -28,7 +45,7 @@ def get_all_topics(df, clusters, num_topics=3, num_words=3):
     idx = 0
     size = len(clusters)
     print("Number of cluster : %d" % size)
-    for n in clusters:
+    for n in tqdm(clusters):
         print("progress - %d / %d" % (idx, size))
         topics[n] = get_topics(df, n, num_topics, num_words)
         idx = idx + 1
@@ -60,9 +77,10 @@ def topic_print(topics):
 def calc_similarity(df, docvecs, centers):
     df['similarity'] = [cs_similarity(docvecs[idx], centers[row['cluster']]) for idx, row in df.iterrows()]
     
-def similarity_iner_score(centers, df, docvecs):
+def similarity_iner_score(centers, df, docvecs, threshold):
     scores = []
     clusters = df.cluster
+    total_size = len(df)
     for n in clusters.unique():
         center = centers[n]
         cluster = df[df.cluster==n]
@@ -76,56 +94,71 @@ def similarity_iner_score(centers, df, docvecs):
         
         variance = cluster_distance / size
         similarity = cluster_similarity / size
-        scores.append((n, size, cluster_distance, variance, similarity, similarity / variance))
+        in_threshold = len(cluster[cluster.similarity>=threshold])
+        in_threshold_ratio = in_threshold / float(size)
+        portion = size / float(total_size)
+        cohesion = 100 * portion * in_threshold_ratio * similarity / variance
+        scores.append((n, size, portion, cluster_distance, variance, similarity, in_threshold, in_threshold_ratio, cohesion))
 
-    return pd.DataFrame(scores, columns = ['cluster', 'cnt', 'distance', 'variance', 'similarity', 'cohesion'])
+    return pd.DataFrame(scores, columns = ['cluster', 'cnt', 'portion', 'distance', 'variance', 'similarity', 'in_threshold', 'in_ratio', 'cohesion'])
 
-def similarity_clustering(df_, docvecs, threshold=0.5):
-    df = df_[:]
+def similarity_clustering(df_, docvecs, threshold=0.8, repeat=5):
     t0 = time()
     # Initialize
-    df['rank'] = np.zeros(len(df))
-    df['cluster'] = [idx for idx, row in df.iterrows()]
+    pr = []
     centers = {}
-    sd = {}
-    for idx, row in df.iterrows():
+    for idx, row in df_.iterrows():
         centers[idx] = docvecs[idx]
+        pr.append((idx, 0))
+    clu_rank = pd.DataFrame(pr, df_.index, columns = ['parent', 'rank'])
+
+    for i in range(repeat):
+        print("Iter %d/%d"%(i+1,repeat))
+                      
+        # Calculate similarity
+        sd = {}
+        p_unique = clu_rank.parent.unique()
+        print("Calculate similarity. size:%d"%len(p_unique))
+        for t in tqdm(list(itertools.combinations(p_unique, 2))):
+            similarity = cs_similarity(centers[t[0]], centers[t[1]])
+            if(similarity >= threshold):
+                sd[t] = similarity
+
+        # Sort
+        print("Sorting")
+        ordered_sd = OrderedDict(sorted(sd.items()), key=lambda x: -x[1])
+
+        # Clustering
+        size = len(ordered_sd.items()[:-1])
+        print("Clustering - size:%d" % (size))
+
+        for key, similarity in tqdm(ordered_sd.items()[:-1]):
+            u_cluster = find(clu_rank, key[0])
+            v_cluster = find(clu_rank, key[1])
+            vec_sim = cs_similarity(centers[u_cluster], centers[v_cluster])
+            if(u_cluster != v_cluster and vec_sim >= threshold):
+                cluster = union(clu_rank, u_cluster, v_cluster)
+                centers[cluster] = merge_similarity(centers[u_cluster], centers[v_cluster])
+
+        for idx, row in clu_rank.iterrows():
+            find(clu_rank, idx)
         
-    # Calculate similarity
-    print("Calculate similarity. size:%d"%len(df))
-    for t in itertools.combinations(df.index, 2):
-        similarity = docvecs.similarity(d1=t[0], d2=t[1])
-        if(similarity >= threshold):
-            sd[t] = similarity
-            
-    # Sort
-    print("Sorting")
-    ordered_sd = OrderedDict(sorted(sd.items()), key=lambda x: -x[1])
-    
-    # Clustering
-    size = len(ordered_sd.items()[:-1])
-    cnt = 0
-    per = 0
-    print("Clustering - size:%d" % (size))
-    
-    for key, similarity in ordered_sd.items()[:-1]:
-        cnt = cnt + 1
-        tmp = int(100 * cnt / size)
-        if(per + 1 == tmp): 
-            per = per + 1
-            print("progress - %d / 100" % per)
-        u_cluster = find(df, key[0])
-        v_cluster = find(df, key[1])
-        vec_sim = cs_similarity(centers[u_cluster], centers[v_cluster])
-        if(u_cluster != v_cluster and vec_sim >= threshold):
-            cluster = union(df, u_cluster, v_cluster)
-            centers[cluster] = merge_similarity(centers[u_cluster], centers[v_cluster])
-            
-    for idx, row in df.iterrows():
-        find(df, idx)
+        if(i != repeat - 1):
+            for idx, row in clu_rank.iterrows():
+                center = centers[row.parent]
+                similarity = cs_similarity(docvecs[idx], center)
+                if(similarity<threshold):
+                    clu_rank.set_value(idx, 'parent', idx)
+                    
+            for p in clu_rank.parent.unique():
+                cluster = clu_rank[clu_rank.parent==p]
+                center = docvecs[p]
+                for i, c in cluster.iterrows():
+                    center = merge_similarity(center, docvecs[i])
+                centers[p] = center
             
     print("Done in %0.3fs." % (time() - t0))
-    return centers, df.cluster
+    return centers, clu_rank.parent
     
 # cosine
 def cs_similarity(v1, v2, n = 100):
@@ -143,26 +176,26 @@ def merge_similarity(v1, v2):
 
 ## merge
 def find(df, idx):
-    parent = df.loc[idx]['cluster']
+    parent = df.loc[idx]['parent']
     if(idx == parent): return idx
 
     newParent = find(df, parent)
-    df.set_value(idx, 'cluster', newParent)
+    df.set_value(idx, 'parent', newParent)
     return newParent
 
-def union(df, u_cluster, v_cluster):
-    if (u_cluster == v_cluster): return
+def union(df, u_parent, v_parent):
+    if (u_parent == v_parent): return
     
-    u_rank = df.loc[u_cluster]['rank']
-    v_rank = df.loc[v_cluster]['rank']
+    u_rank = df.loc[u_parent]['rank']
+    v_rank = df.loc[v_parent]['rank']
     if(u_rank > v_rank):
-        df.set_value(v_cluster, 'cluster', u_cluster)
-        return u_cluster
+        df.set_value(v_parent, 'parent', u_parent)
+        return u_parent
     else:
-        df.set_value(u_cluster, 'cluster', v_cluster)
+        df.set_value(u_parent, 'parent', v_parent)
         if(u_rank == v_rank):
-            df.set_value(v_cluster, 'rank', v_rank + 1)
-        return v_cluster
+            df.set_value(v_parent, 'rank', v_rank + 1)
+        return v_parent
 
 ## Deprecated
 def similarity_clustering_tuple(df, docvecs, threshold=0.5):

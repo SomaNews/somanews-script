@@ -25,7 +25,7 @@ w2v_path = "../datastore/sejongcorpus_w2v2.p"
 corpus_path = "../datastore/corpus2.p"
 now = datetime.now()
 prefix = int("%.2d%.2d"%(now.month, now.day))
-prefix_str = "%d_00_" % prefix
+prefix_str = "%d_00" % prefix
 
 # # Clustering
 train_df = articles_data.find_recent_articles(crawled_collection, catelist_path)

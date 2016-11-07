@@ -1,8 +1,13 @@
+# -*- coding: utf-8 -*-  
+
 from konlpy.tag import Mecab
 import hanja
 import re
 
 mecab = Mecab()
+
+def test_special_ch(typ):
+    return typ == u'SF' or typ == u'SE' or typ == u'SSO' or typ == u'SSC' or typ == u'SC' or typ == u'SY'
 
 def test_noun(typ):
     return typ == u'NNP' or typ == u'NNG'
@@ -38,14 +43,33 @@ def extract_all_compound_nouns(inp_pos, max_n):
         results = results + extract_compound_nouns(inp_pos, n)
     return results
 
-def morphs_ngrams(inp_pos, n):
-    ngrams = zip(*[inp_pos[i:] for i in range(n)])
-    return [''.join(e[0] + e[1] for e in ngram) for ngram in ngrams]
-    
+def morphs_ngrams(inp_pos, max_n):
+    results = []
+    for n in range(1, max_n + 1):
+        ngrams = zip(*[inp_pos[i:] for i in range(n)])
+        results = results + [''.join(e[0] + e[1] for e in ngram) for ngram in ngrams]
+    return results
+
+def morphs_ngrams_without_tag(inp_pos, max_n):
+    results = []
+    for n in range(1, max_n + 1):
+        ngrams = zip(*[inp_pos[i:] for i in range(n)])
+        for ngram in ngrams:
+            if(all([not test_special_ch(e[1]) for e in ngram])):
+                results = results + [''.join(e[0] for e in ngram)]
+    return results
+
 def text_cleaning(text):
     text = hanja.translate(text, 'substitution')
     text = re.sub(u'(\[.*\]|\(.*\))', '', text)
     text = re.sub(u'(\(|\)|\[|\])', '', text)
+    return text
+
+def text_cleaning_without_special_ch(text):
+    text = hanja.translate(text, 'substitution')
+    text = re.sub(u'(\[.*\]|\(.*\))', '', text)
+    text = re.sub(u'(\(|\)|\[|\])', '', text)
+    text = re.sub(u'[^가-힝0-9a-zA-Z\\s]', '', text)
     return text
 
 def tokenize(inp_str):
