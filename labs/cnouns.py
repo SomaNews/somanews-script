@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-  
 
 from konlpy.tag import Mecab
+import pandas as pd
 import hanja
 import re
 
@@ -61,15 +62,15 @@ def morphs_ngrams_without_tag(inp_pos, max_n):
 
 def text_cleaning(text):
     text = hanja.translate(text, 'substitution')
-    text = re.sub(u'(\[.*\]|\(.*\))', '', text)
+#    text = re.sub(u'(\[.*\]|\(.*\))', '', text)
     text = re.sub(u'(\(|\)|\[|\])', '', text)
     return text
 
 def text_cleaning_without_special_ch(text):
     text = hanja.translate(text, 'substitution')
-    text = re.sub(u'(\[.*\]|\(.*\))', '', text)
-    text = re.sub(u'(\(|\)|\[|\])', '', text)
-    text = re.sub(u'[^가-힝0-9a-zA-Z\\s]', '', text)
+#    text = re.sub(u'(\[.*\]|\(.*\))', '', text)
+    text = re.sub(u'(\(|\)|\[|\])', ' ', text)
+    text = re.sub(u'[^가-힝0-9a-zA-Z\\s]', ' ', text)
     return text
 
 def tokenize(inp_str):
@@ -98,3 +99,55 @@ def pos_tags_arr(inp_str):
     clean_text = text_cleaning(inp_str)
     pos_tags = mecab.pos(clean_text)
     return [pt[0] + pt[1] for pt in pos_tags]
+
+def tokenize_syllables(max_n, clean_text):
+    split_by_whitespace = clean_text.split(' ')
+
+    syllables = []
+    for target_term in split_by_whitespace:
+        for n in range(1, max_n + 1):
+            syllables.append(target_term[:n])
+    syllables = sorted(list(set(syllables)))
+    
+    return syllables
+
+def filter_special_ch(pos_tags):
+    for pt in pos_tags:
+        if not test_special_ch(pt[1]): yield pt
+
+def custom_pos(pts, max_n, dicts):
+    for n in reversed(range(2, max_n)):
+        tmp = []
+        i = 0
+        while i < len(pts):
+            word = ''.join([pt[0] for pt in pts[i:i+n]])
+            if(word in dicts):
+                tmp.append((word, u'NNP'))
+                i = i + n
+            else:
+                tmp.append(pts[i])
+                i = i + 1
+        pts = tmp
+    return pts
+
+def custom_pos_tags(inp_str, dicts):
+    return ' '.join(custom_pos_tags_arr(inp_str, dicts))
+
+def custom_pos_tags_arr(inp_str, dicts):
+    clean_text = hanja.translate(inp_str, 'substitution')
+    clean_text = remove_headlines(clean_text)
+    pos_tags = mecab.pos(clean_text)
+    pos_tags = custom_pos(pos_tags, 5, dicts)
+    filtered = filter_special_ch(pos_tags)
+    return [pt[0] + pt[1] for pt in filtered]
+
+def remove_headlines(text, headline_path = '../datastore/headline2.p'):
+    headlines = pd.read_pickle(headline_path)
+    headlines = headlines['headline'].tolist()
+    
+    for headline in headlines:
+        text = text.replace(headline, '')
+    return text
+
+def tokenizer(inp_str):
+    return pos_tags(inp_str)

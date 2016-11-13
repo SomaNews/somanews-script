@@ -11,6 +11,9 @@ from gensim.models.ldamodel import LdaModel
 from gensim import corpora, models
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from time import mktime
+import math
+from datetime import datetime
 
 def test_print(cluster, df, docvecs, centers, topics, score, threshold, diff_threshold):
     print(score[score.cluster==cluster])
@@ -81,6 +84,8 @@ def similarity_iner_score(centers, df, docvecs, threshold):
     scores = []
     clusters = df.cluster
     total_size = len(df)
+    now = datetime.now()
+    
     for n in clusters.unique():
         center = centers[n]
         cluster = df[df.cluster==n]
@@ -88,19 +93,27 @@ def similarity_iner_score(centers, df, docvecs, threshold):
         
         cluster_similarity = 0
         cluster_distance = 0
+        cluster_time = 0
         for idx, row in cluster.iterrows():
             cluster_similarity = cluster_similarity + cs_similarity(center, docvecs[idx])
             cluster_distance = cluster_distance + cs_distance(center, docvecs[idx])
+            cluster_time = cluster_time + (now - row.publishedAt).total_seconds()
         
+        time_mean = cluster_time / size
+        time_v = 0
+        for idx, row in cluster.iterrows():
+            time_v = math.pow(time_mean - (now - row.publishedAt).total_seconds(), 2)
+        
+        time_v = time_v / size
         variance = cluster_distance / size
         similarity = cluster_similarity / size
         in_threshold = len(cluster[cluster.similarity>=threshold])
         in_threshold_ratio = in_threshold / float(size)
         portion = size / float(total_size)
         cohesion = 100 * portion * in_threshold_ratio * similarity / variance
-        scores.append((n, size, portion, cluster_distance, variance, similarity, in_threshold, in_threshold_ratio, cohesion))
+        scores.append((n, size, portion, in_threshold, in_threshold_ratio, time_mean, time_v, cluster_distance, variance, similarity, cohesion))
 
-    return pd.DataFrame(scores, columns = ['cluster', 'cnt', 'portion', 'distance', 'variance', 'similarity', 'in_threshold', 'in_ratio', 'cohesion'])
+    return pd.DataFrame(scores, columns = ['cluster', 'cnt', 'portion', 'in_threshold', 'in_ratio', 'time_mean', 'time_v', 'distance', 'variance', 'similarity', 'cohesion'])
 
 def similarity_clustering(df_, docvecs, threshold=0.8, repeat=5):
     t0 = time()
@@ -112,7 +125,7 @@ def similarity_clustering(df_, docvecs, threshold=0.8, repeat=5):
         pr.append((idx, 0))
     clu_rank = pd.DataFrame(pr, df_.index, columns = ['parent', 'rank'])
 
-    for i in range(repeat):
+    for i in range(0, repeat):
         print("Iter %d/%d"%(i+1,repeat))
                       
         # Calculate similarity
@@ -156,9 +169,79 @@ def similarity_clustering(df_, docvecs, threshold=0.8, repeat=5):
                 for i, c in cluster.iterrows():
                     center = merge_similarity(center, docvecs[i])
                 centers[p] = center
+                
+#        iner_socre(centers, df_, docvecs, threshold, 10)
             
     print("Done in %0.3fs." % (time() - t0))
     return centers, clu_rank.parent
+    
+def similarity_clustering_time(df_, docvecs, threshold=0.8, repeat=5):
+    t0 = time()
+    now = datetime.now()
+    # Initialize
+    pr = []
+    centers = {}
+    for idx, row in df_.iterrows():
+        centers[idx] = docvecs[idx]
+        pr.append((idx, 0))
+    clu_rank = pd.DataFrame(pr, df_.index, columns = ['parent', 'rank'])
+
+    breaked = True
+    i = 0
+    while breaked:
+        i = i + 1
+        cnt = 0
+        breaked = False
+        p_unique = clu_rank.parent.unique()
+        for key in itertools.combinations(p_unique, 2):
+            cnt = cnt + 1
+            u_cluster = find(clu_rank, key[0])
+            v_cluster = find(clu_rank, key[1])
+            vec_sim = cs_similarity(centers[u_cluster], centers[v_cluster])
+            if(u_cluster != v_cluster and vec_sim >= threshold):
+                cluster = union(clu_rank, u_cluster, v_cluster)
+                centers[cluster] = merge_similarity(centers[u_cluster], centers[v_cluster])
+                breaked = True
+                break
+        print("Iterated: %d, passed cnt: %d"%(i, cnt))
+        if(i - 1 > repeat):
+            break
+
+    for idx, row in clu_rank.iterrows():
+        find(clu_rank, idx)
+
+    for idx, row in clu_rank.iterrows():
+        center = centers[row.parent]
+        similarity = cs_similarity(docvecs[idx], center)
+        if(similarity<threshold):
+            clu_rank.set_value(idx, 'parent', idx)
+
+    for p in clu_rank.parent.unique():
+        cluster = clu_rank[clu_rank.parent==p]
+        center = docvecs[p]
+        for i, c in cluster.iterrows():
+            center = merge_similarity(center, docvecs[i])
+        centers[p] = center
+                
+    print("Done in %0.3fs." % (time() - t0))
+    return centers, clu_rank.parent
+    
+    
+def iner_socre(centers, df, docvecs, threshold, cnt_threshold):
+    scores = similarity_iner_score(centers, df, docvecs, threshold)
+    size_1 = scores[scores.cnt==1]
+    countby = scores[scores.cnt>cnt_threshold]
+    print "total:", len(scores), ", size_1:",len(size_1), ", countby:", len(countby)
+    ss = countby.sum(axis=0)
+    print "distance:", ss['distance'] * 100
+    print "variance:", ss['variance']
+    print "similarity:", (ss['similarity'] * 100)/len(countby)
+    print "cohesion:", ss['cohesion']
+    print "in_threshold:", ss['in_threshold']
+    print "time_mean:", ss['time_mean']
+    print "time_v:", ss['time_v']
+    print "portion:", ss['portion']
+    return scores, countby
     
 # cosine
 def cs_similarity(v1, v2, n = 100):

@@ -5,26 +5,27 @@ import pandas as pd
 import datetime
 from gensim.models import Word2Vec
 import cnouns as cn
-import cPickle as pickle
+import pickle
 from multiprocessing import Pool
 from time import time
-import os
 import re
+import os
 
-def is_dirty_article(title, content, min_len = 100):
-    if(len(content) < min_len):
-        return True
+
+def remove_headlines(text, headline_path):
+    headlines = pd.read_pickle(headline_path)
+    headlines = headlines['headline'].tolist()
+    result = re.match(r"[^[]*\[([^]]*)\]", text)
     
-    dh = get_dirty_headlines()
-    result = re.match(r"[^[]*\[([^]]*)\]", title)
     if result:
-        if result.groups()[0] in dh:
-            return True
+        if result.groups()[0] == '경향포토':
+            text = text.replace(text, 'NaN')
+            return text
         
-    return False
-
-def get_dirty_headlines():
-    return [u"경향포토", u"오늘의 날씨"]
+        for headline in headlines:
+            text = text.replace(headline, ' ')
+        
+    return text
 
 def get_target_cate():
     return [u"정치", u"사회", u"과학", u"경제"]
@@ -37,8 +38,7 @@ def find_recent_articles(collection, catelist_path):
     article_list = []
     d = datetime.datetime.now() - datetime.timedelta(days=7)
     for article in articles.find({"publishedAt": {"$gt": d}}).sort("publishedAt"):
-        if(not is_dirty_article(article['title'], article['content'])):
-            article_list.append(article)
+        article_list.append(article)
 
     articles_df = pd.DataFrame.from_dict(article_list)
 
@@ -66,7 +66,7 @@ class Sentences(object):
             for line in open(os.path.join(self.dirname, fname)):
                 yield line.split()
                                 
-def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4, tokenizer=cn.tokenizer):
+def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4, tokenize=cn.pos_tags):
     articles = collection.find()
     
     articles_list = []
@@ -88,15 +88,15 @@ def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4,
     batchs = [words[i:i + batch_size] for i in xrange(0, len(words), batch_size)]
     print("Number of batchs - %d" % len(batchs))
     
-    # p = Pool(workers)
+    # p = Pool(1)
     for idx, batch in enumerate(batchs):
         t0 = time()
-        # tokens = p.map(tokenizer, batch)
-        tokens = [tokenizer(b) for b in batch]
+        # tokens = p.map(tokenize, batch)
+        tokens = [tokenize(b) for b in batch]
         f = open("%s/%d"%(target_dir, idx), "w")
         f.write("\n".join(tokens).encode('utf8'))
         f.close()
-        print("Batch#%d - tokenizer took %f sec"%(idx, time() - t0))
+        print("Batch#%d - tokenize took %f sec"%(idx, time() - t0))
         
     return len(batchs)
         
