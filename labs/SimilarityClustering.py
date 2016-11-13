@@ -30,6 +30,7 @@ from collections import OrderedDict
 from gensim.models.doc2vec import LabeledSentence
 import articles_data
 import datetime 
+from tqdm import tqdm
 
 import multiprocessing
 from gensim.test.test_doc2vec import ConcatenatedDoc2Vec
@@ -41,6 +42,8 @@ assert gensim.models.doc2vec.FAST_VERSION > -1, "this will be painfully slow oth
 from random import shuffle
 
 from collections import namedtuple
+from ntc_rank import calc_issue_rank
+from sklearn.decomposition import PCA
 
 Articles = namedtuple('Articles', 'words tags split')
 
@@ -77,9 +80,7 @@ class SimilarityClustering:
         size = len(self.df_) / 4
         
         ## tokenize
-        print("Tokenizing.....")
-        self.df_['target_str'] = [tokenizer(row.title + " " + row.content) for idx, row in self.df_.iterrows()]
-        print("Complete to tokenize.")
+        self.df_['target_str'] = [tokenizer(row.title + " " + row.content) for idx, row in tqdm(self.df_.iterrows(), desc="Tokenizing")]
         
         ## make docs
         for idx, row in self.df_.iterrows():
@@ -115,10 +116,10 @@ class SimilarityClustering:
         
         ## reset doc2vec model
         simple_models[0].build_vocab(self.alldocs_)
-        print simple_models[0]
+        #print simple_models[0]
         for model in simple_models[1:]:
             model.reset_from(simple_models[0])
-            print(model)
+            #print(model)
 
         self.models_by_name_ = OrderedDict((str(model), model) for model in simple_models)
         
@@ -126,15 +127,15 @@ class SimilarityClustering:
         doc_list = self.alldocs_[:]
         alpha_delta = (alpha - min_alpha) / passes
 
-        for epoch in range(passes):
+        for epoch in tqdm(range(passes), desc="Doc2Vec Training"):
             shuffle(doc_list)  # shuffling gets best results
 
             for name, train_model in self.models_by_name_.items():
                 train_model.alpha, train_model.min_alpha = alpha, alpha
                 train_model.train(doc_list)
-                print("%i passes : %s" % (epoch + 1, name))
+                #print("%i passes : %s" % (epoch + 1, name))
 
-            print('completed pass %i at alpha %f' % (epoch + 1, alpha))
+            #print('completed pass %i at alpha %f' % (epoch + 1, alpha))
             alpha -= alpha_delta
     
         self.concat_vec()
@@ -215,19 +216,9 @@ class SimilarityClustering:
         self.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'].save("%s/%s_d2v-dbow.p" % (path, prefix))
         self.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)'].save("%s/%s_d2v-dmm.p" % (path, prefix))
         
-    def s_d2v_load(path, prefix):
-        sc = SimilarityClustering()
-        
-        sc.models_by_name_ = OrderedDict()
-        
-        sc.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)'] = Doc2Vec.load("%s/%s_d2v-dmc.p" % (path, prefix))
-        sc.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'] = Doc2Vec.load("%s/%s_d2v-dbow.p" % (path, prefix))
-        sc.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)'] = Doc2Vec.load("%s/%s_d2v-dmm.p" % (path, prefix))
-        
-        return sc
-    d2v_load=staticmethod(s_d2v_load)
+        self.df_.to_pickle("%s/%s_df.p" % (path, prefix))
     
-    def s_load(path, prefix, threshold=0.8, cnt_threshold=10, only_d2v=False):
+    def s_load(path, prefix, threshold=0.8, cnt_threshold=10, model_name='dbow+dmm', only_d2v=False):
         sc = SimilarityClustering()
         
         sc.models_by_name_ = OrderedDict()
@@ -237,7 +228,7 @@ class SimilarityClustering:
         sc.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)'] = Doc2Vec.load("%s/%s_d2v-dmm.p" % (path, prefix))
 
         sc.concat_vec()
-        sc.select_model()
+        sc.select_model(model_name)
         
         sc.df_ = pd.read_pickle("%s/%s_df.p" % (path, prefix))
         
@@ -321,34 +312,51 @@ class SimilarityClustering:
         clusters = []
 
         time = datetime.datetime.now()
-        clusters_infors = self.countby_.sort_values('cohesion', ascending=False)
+        clusters_infors = self.countby_.sort_values('similarity', ascending=False)
 
         prefix = prefix * 1000
 
         for idx, info in clusters_infors.iterrows():
             new_cluster = prefix + idx
-            leading = self.getMainArticle(info.cluster).to_dict()
+#            leading = self.getMainArticle(info.cluster).to_dict()
             
+            pca = PCA(n_components=100).fit_transform(self.dm_.docvecs)
+    
             articles = []
             for idx, row in self.df_[self.df_.cluster==info.cluster].iterrows():
                 row_dict = row.to_dict()
                 row_dict['cluster'] = new_cluster
+                row_dict['vector'] = pca[idx].tolist()
                 articles.append(row_dict)
             
-            if(leading['imageURL'] == ''):
-                for article in articles:
-                    if(article['imageURL'] != ''):
-                        leading['imageURL'] = article['imageURL']
-                        break
+            cates = {}
+            for cate in articles_data.get_target_cate():
+                cate_items = [article for article in articles if article[u'cate'] == cate]
+                count = len(cate_items)
+                cates[cate] = count
+            
+            leading = articles[0]
+            for article in articles:
+                if article[u'imageURL'] != '':
+                    if((leading['publishedAt'] - article['publishedAt']).total_seconds() > 0):
+                        leading = article
+                
+#            if(leading['imageURL'] == ''):
+#                for article in articles:
+#                    if(article['imageURL'] != ''):
+#                        leading['imageURL'] = article['imageURL']
+#                        break
             
             cluster = {
                 "cluster": new_cluster,
-                "cohesion": info.cohesion,
+                "cohesion": info.similarity,
                 "count": info.cnt,
+                "cate": cates,
                 "leading": leading,
                 "clusteredAt": time,
                 "articles": articles
             }
             clusters.append(cluster)
             
-        collection.insert_many(clusters)
+        calced_cluster = calc_issue_rank(clusters)
+        collection.insert_many(calced_cluster)

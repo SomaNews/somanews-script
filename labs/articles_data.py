@@ -10,6 +10,7 @@ from multiprocessing import Pool
 from time import time
 import os
 import re
+from tqdm import tqdm
 
 def is_dirty_article(title, content, min_len = 100):
     if(len(content) < min_len):
@@ -27,16 +28,16 @@ def get_dirty_headlines():
     return [u"경향포토", u"오늘의 날씨"]
 
 def get_target_cate():
-    return [u"정치", u"사회", u"과학", u"경제"]
+    return [u"정치", u"사회", u"경제"]
 
-def find_recent_articles(collection, catelist_path):
+def find_recent_articles(collection, catelist_path, target_time):
     articles = collection
 
     categories = pd.read_pickle(catelist_path)
 
     article_list = []
-    d = datetime.datetime.now() - datetime.timedelta(days=7)
-    for article in articles.find({"publishedAt": {"$gt": d}}).sort("publishedAt"):
+    d = target_time - datetime.timedelta(days=7)
+    for article in articles.find({"publishedAt": {"$gt": d, "$lt": target_time}}).sort("publishedAt"):
         if(not is_dirty_article(article['title'], article['content'])):
             article_list.append(article)
 
@@ -54,7 +55,7 @@ def find_recent_articles(collection, catelist_path):
     articles_df['cate'] = new_categories
     target_list = get_target_cate()
     
-    return articles_df[articles_df['cate'].isin(target_list)]
+    return articles_df[articles_df['cate'].isin(target_list)].reset_index(drop=True)
 
 class Sentences(object):
     def __init__(self, dirname, size):
@@ -89,14 +90,14 @@ def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4,
     print("Number of batchs - %d" % len(batchs))
     
     # p = Pool(workers)
-    for idx, batch in enumerate(batchs):
+    for idx, batch in tqdm(enumerate(batchs)):
         t0 = time()
         # tokens = p.map(tokenizer, batch)
         tokens = [tokenizer(b) for b in batch]
         f = open("%s/%d"%(target_dir, idx), "w")
         f.write("\n".join(tokens).encode('utf8'))
         f.close()
-        print("Batch#%d - tokenizer took %f sec"%(idx, time() - t0))
+        #print("Batch#%d - tokenizer took %f sec"%(idx, time() - t0))
         
     return len(batchs)
         

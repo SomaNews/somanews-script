@@ -8,6 +8,7 @@ import cnouns as cn
 import pickle
 from multiprocessing import Pool
 from time import time
+import ntc_rank
 import re
 import os
 
@@ -30,15 +31,16 @@ def remove_headlines(text, headline_path):
 def get_target_cate():
     return [u"정치", u"사회", u"과학", u"경제"]
 
-def find_recent_articles(collection, catelist_path):
+def find_recent_articles(collection, catelist_path, target_time):
     articles = collection
 
     categories = pd.read_pickle(catelist_path)
 
     article_list = []
-    d = datetime.datetime.now() - datetime.timedelta(days=7)
-    for article in articles.find({"publishedAt": {"$gt": d}}).sort("publishedAt"):
-        article_list.append(article)
+    d = target_time - datetime.timedelta(days=7)
+    for article in articles.find({"publishedAt": {"$gt": d, "$lt": target_time}}).sort("publishedAt"):
+        if(not is_dirty_article(article['title'], article['content'])):
+            article_list.append(article)
 
     articles_df = pd.DataFrame.from_dict(article_list)
 
@@ -54,7 +56,7 @@ def find_recent_articles(collection, catelist_path):
     articles_df['cate'] = new_categories
     target_list = get_target_cate()
     
-    return articles_df[articles_df['cate'].isin(target_list)]
+    return articles_df[articles_df['cate'].isin(target_list)].reset_index(drop=True)
 
 class Sentences(object):
     def __init__(self, dirname, size):
@@ -99,8 +101,45 @@ def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4,
         print("Batch#%d - tokenize took %f sec"%(idx, time() - t0))
         
     return len(batchs)
-        
-def trainWord2Vec(src, dest, size=50):
-    sentences = Sentences(src, size)
-    w2v = Word2Vec(sentences)
-    w2v.save_word2vec_format(dest)
+  
+def save_to_db(train, prefix, collections, cohesions):
+    clusters = []
+    time = datetime.datetime.now()
+    clusters_infors = [(name, group) for name, group in train.groupby('cluster')]
+    prefix = prefix * 1000
+    i = 0
+    for cluster in clusters_infors:
+        new_cluster = prefix + cluster[0]
+        info = cluster[1].size
+
+        articles = []
+        for idx, row in cluster[1].iterrows():
+            row_dict = row.to_dict()
+            articles.append(row_dict)
+
+        cates = {}
+        for cate in get_target_cate():
+            cate_items = [article for article in articles if article['cate'] == cate]
+            count = len(cate_items)
+            cates[cate] = count
+
+        leading = articles[0]
+        for article in articles:
+            if article['imageURL'] != '':
+                if((leading['publishedAt'] - article['publishedAt']).total_seconds() > 0):
+                    leading = article
+
+        cluster = {
+            "cluster": str(new_cluster),
+            "cohesion": cohesions[i],
+            "count": int(info),
+            "cate": cates,
+            "leading": leading,
+            "clusteredAt": time,
+            "articles": articles
+        }
+        clusters.append(cluster)
+        i = i+1
+
+    clusters = ntc_rank.calc_issue_rank(clusters)
+    collections.insert_many(clusters)

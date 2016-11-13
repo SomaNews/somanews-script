@@ -98,7 +98,9 @@ def pos_tags(inp_str):
 def pos_tags_arr(inp_str):
     clean_text = text_cleaning(inp_str)
     pos_tags = mecab.pos(clean_text)
-    return [pt[0] + pt[1] for pt in pos_tags]
+    filtered = filter_special_ch(pos_tags)
+    return [pt[0] + pt[1] for pt in filtered]
+#    return [pt[0] + pt[1] for pt in pos_tags]
 
 def tokenize_syllables(max_n, clean_text):
     split_by_whitespace = clean_text.split(' ')
