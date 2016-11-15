@@ -8,31 +8,39 @@ import numpy as np
 import pandas as pd
 import cnouns as cn
 from pymongo import MongoClient
-from datetime import datetime
+import datetime
 
-# # DB
 client = MongoClient('mongodb://localhost:27017/somanews')
 client.somanews.authenticate('ssomanews', 'ssomanews1029')
 db = client.get_database('somanews')
 
 crawled_collection = db.get_collection('crawledArticles')
-clusters_collection = db.get_collection('clusters')
+clusters_collection = db.get_collection('bclusters')
+articles_collection = db.get_collection('barticles')
 
-# # Params
-catelist_path = '../datastore/category2.p'
-w2v_src_dir = "../datastore/w2v_src"
-w2v_path = "../datastore/sejongcorpus_w2v2.p"
-corpus_path = "../datastore/corpus2.p"
-now = datetime.now()
-prefix = int("%.2d%.2d"%(now.month, now.day))
+datastore_dir = "../datastore/"
+catelist_path = datastore_dir + "category2.p"
+w2v_src_dir = datastore_dir + "w2v_src3"
+w2v_path = datastore_dir + "sejongcorpus_w2v3_2.p"
+
+corpus_path = datastore_dir + "corpus2.p"
+target_time = datetime.datetime.now()
+prefix = int("%.2d%.2d"%(target_time.month, target_time.day))
 prefix_str = "%d_00" % prefix
 
-# # Clustering
-train_df = articles_data.find_recent_articles(crawled_collection, catelist_path)
+dicts = [u'새누리', u'새누리당', u'더민주', u'더민주당', u'최순실', u'박대통령', u'국회의장', u'야권의요구', u'정기국회', u'참여정부']
+def tokenizer(inp_str):
+    return cn.custom_pos_tags(inp_str, dicts)
+
+# # Model
+train_df = articles_data.find_recent_articles(crawled_collection, catelist_path, target_time)
 sc = SimilarityClustering()
-sc.train("cate", w2v_path, train_df, path="../datastore", prefix=prefix_str)
+sc.train("cate", w2v_path, train_df, path=datastore_dir, prefix=prefix_str, tokenizer=tokenizer,
+            threshold=0.7,
+            cnt_threshold=2,
+            repeat=1,
+            model_name='dbow+dmm')
 
 # # Save
-sc.save_to_db(prefix, clusters_collection)
-
-print("complete!!")
+sc.save(path=datastore_dir, prefix=prefix_str)
+calced_clusters = sc.save_to_db(prefix, clusters_collection, articles_collection, target_time, test=True)

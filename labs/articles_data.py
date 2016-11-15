@@ -28,7 +28,7 @@ def get_dirty_headlines():
     return [u"경향포토", u"오늘의 날씨"]
 
 def get_target_cate():
-    return [u"정치", u"사회", u"경제"]
+    return [u"정치", u"사회", u"경제", u"과학"]
 
 def find_recent_articles(collection, catelist_path, target_time):
     articles = collection

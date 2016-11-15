@@ -174,7 +174,7 @@ def similarity_clustering(df_, docvecs, threshold=0.8, repeat=5):
 #        iner_socre(centers, df_, docvecs, threshold, 10)
             
     print("Done in %0.3fs." % (time() - t0))
-    return centers, clu_rank.parent
+    return centers, clu_rank
     
 def similarity_clustering_time(df_, docvecs, threshold=0.8, repeat=5):
     t0 = time()
@@ -246,9 +246,9 @@ def iner_socre(centers, df, docvecs, threshold, cnt_threshold):
     
 # cosine
 def cs_similarity(v1, v2):
-    n = 100 # len(v2)
+    n = len(v2)
     cs = cosine_similarity(v1.reshape(1,n), v2.reshape(1,n))[0][0]
-    print cs
+#    print cs
     if(cs>1): return 1
     elif(cs<-1): return -1
     else: return cs

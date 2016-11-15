@@ -22,12 +22,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from datetime import datetime
 import datetime
 from sklearn.decomposition import PCA
+import gensim
 from gensim import models
-from gensim.models import Doc2Vec
 from gensim.models import Word2Vec
-import gensim.models.doc2vec
+from gensim.models.doc2vec import TaggedDocument, Doc2Vec, LabeledSentence
 from collections import OrderedDict
-from gensim.models.doc2vec import LabeledSentence
 import articles_data
 import datetime 
 from tqdm import tqdm
@@ -41,11 +40,8 @@ assert gensim.models.doc2vec.FAST_VERSION > -1, "this will be painfully slow oth
 
 from random import shuffle
 
-from collections import namedtuple
 from ntc_rank import calc_issue_rank
 from sklearn.decomposition import PCA
-
-Articles = namedtuple('Articles', 'words tags split')
 
 class SimilarityClustering:
     # df_
@@ -71,7 +67,8 @@ class SimilarityClustering:
         
         
     def reset(self, train_df):
-        self.df_ = train_df[:]
+        self.df_ = train_df.reset_index(drop=True)
+        self.df_ = self.df_.sort_index()
         
         
     def tokenize(self, tokenizer=cn.tokenizer):
@@ -84,13 +81,11 @@ class SimilarityClustering:
         
         ## make docs
         for idx, row in self.df_.iterrows():
-            tokens = row['target_str'].split(' ')
-            words = tokens[0:]
+            words = row['target_str'].split(' ')
             tags = [idx]
-            tmp = idx//size % 4
-            split = ['train','test','extra','extra'][tmp]  # 25k train, 25k test, 25k extra
-            self.alldocs_.append(Articles(words, tags, split))
+            self.alldocs_.append(TaggedDocument(words, tags))
             
+        print("Size of documents: %d"%(len(self.alldocs_)))
         self.df_.drop(['target_str'], axis=1, inplace=True)
         self.times_["preprocessing"]["end"] = time()
     
@@ -115,14 +110,21 @@ class SimilarityClustering:
         print("Complete to load.")
         
         ## reset doc2vec model
+        self.models_by_name_ = OrderedDict()
         simple_models[0].build_vocab(self.alldocs_)
         #print simple_models[0]
         for model in simple_models[1:]:
             model.reset_from(simple_models[0])
             #print(model)
 
-        self.models_by_name_ = OrderedDict((str(model), model) for model in simple_models)
+        self.models_by_name_['dmc'] = simple_models[0]
+        self.models_by_name_['dbow'] = simple_models[1]
+        self.models_by_name_['dmm'] = simple_models[2]
         
+        print("Size of docvecs: %d"%(len(simple_models[0].docvecs)))
+        
+        assert len(simple_models[0].docvecs) == len(self.alldocs_), "docvecs and documents is not matched."  
+            
         ## training
         doc_list = self.alldocs_[:]
         alpha_delta = (alpha - min_alpha) / passes
@@ -142,7 +144,7 @@ class SimilarityClustering:
         self.times_["learning"]["end"] = time()
         
     
-    def select_model(self, model_name='Doc2Vec(dm/c,d100,n5,w5,mc2,t8)'):
+    def select_model(self, model_name='dmc'):
         self.dm_ = self.models_by_name_[model_name]
         
         
@@ -151,7 +153,8 @@ class SimilarityClustering:
         print("Similarity clustering.....")
         self.centers_, clusters = du.similarity_clustering(self.df_, self.dm_.docvecs, threshold, repeat)
 #        self.centers_, clusters = du.similarity_clustering_time(self.df_, self.dm_.docvecs, threshold, repeat)
-        self.df_['cluster'] = clusters
+        sorted_clusters = clusters.sort_index()
+        self.df_['cluster'] = sorted_clusters.parent
         du.calc_similarity(self.df_, self.dm_.docvecs, self.centers_)
         print("Complete to similarity clustering.")
         self.times_["clustering"]["end"] = time()
@@ -170,7 +173,9 @@ class SimilarityClustering:
             centers.update(center)
             clusters.append(cluster)    
         self.centers_ = centers
-        self.df_['cluster'] = pd.concat(clusters, axis=0)
+        cluster_df = pd.concat(clusters, axis=0)
+        sorted_clusters = cluster_df.sort_index()
+        self.df_['cluster'] = sorted_clusters.parent
         du.calc_similarity(self.df_, self.dm_.docvecs, self.centers_)
         print("Complete to similarity clustering.")
         self.times_["clustering"]["end"] = time()
@@ -195,9 +200,9 @@ class SimilarityClustering:
             
             
     def save(self, path, prefix):
-        self.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)'].save("%s/%s_d2v-dmc.p" % (path, prefix))
-        self.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'].save("%s/%s_d2v-dbow.p" % (path, prefix))
-        self.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)'].save("%s/%s_d2v-dmm.p" % (path, prefix))
+        self.models_by_name_['dmc'].save("%s/%s_d2v-dmc.p" % (path, prefix))
+        self.models_by_name_['dbow'].save("%s/%s_d2v-dbow.p" % (path, prefix))
+        self.models_by_name_['dmm'].save("%s/%s_d2v-dmm.p" % (path, prefix))
 
         self.df_.to_pickle("%s/%s_df.p" % (path, prefix))
         
@@ -208,13 +213,13 @@ class SimilarityClustering:
         print("Complete to save model.")
         
     def concat_vec(self):
-        self.models_by_name_['dbow+dmm'] = ConcatenatedDoc2Vec([self.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'], self.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)']])
-        self.models_by_name_['dbow+dmc'] = ConcatenatedDoc2Vec([self.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'], self.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)']])
+        self.models_by_name_['dbow+dmm'] = ConcatenatedDoc2Vec([self.models_by_name_['dbow'], self.models_by_name_['dmm']])
+        self.models_by_name_['dbow+dmc'] = ConcatenatedDoc2Vec([self.models_by_name_['dbow'], self.models_by_name_['dmc']])
 
     def d2v_save(self, path, prefix):
-        self.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)'].save("%s/%s_d2v-dmc.p" % (path, prefix))
-        self.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'].save("%s/%s_d2v-dbow.p" % (path, prefix))
-        self.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)'].save("%s/%s_d2v-dmm.p" % (path, prefix))
+        self.models_by_name_['dmc'].save("%s/%s_d2v-dmc.p" % (path, prefix))
+        self.models_by_name_['dbow'].save("%s/%s_d2v-dbow.p" % (path, prefix))
+        self.models_by_name_['dmm'].save("%s/%s_d2v-dmm.p" % (path, prefix))
         
         self.df_.to_pickle("%s/%s_df.p" % (path, prefix))
     
@@ -223,9 +228,9 @@ class SimilarityClustering:
         
         sc.models_by_name_ = OrderedDict()
         
-        sc.models_by_name_['Doc2Vec(dm/c,d100,n5,w5,mc2,t8)'] = Doc2Vec.load("%s/%s_d2v-dmc.p" % (path, prefix))
-        sc.models_by_name_['Doc2Vec(dbow,d100,n5,mc2,t8)'] = Doc2Vec.load("%s/%s_d2v-dbow.p" % (path, prefix))
-        sc.models_by_name_['Doc2Vec(dm/m,d100,n5,w10,mc2,t8)'] = Doc2Vec.load("%s/%s_d2v-dmm.p" % (path, prefix))
+        sc.models_by_name_['dmc'] = Doc2Vec.load("%s/%s_d2v-dmc.p" % (path, prefix))
+        sc.models_by_name_['dbow'] = Doc2Vec.load("%s/%s_d2v-dbow.p" % (path, prefix))
+        sc.models_by_name_['dmm'] = Doc2Vec.load("%s/%s_d2v-dmm.p" % (path, prefix))
 
         sc.concat_vec()
         sc.select_model(model_name)
@@ -278,7 +283,7 @@ class SimilarityClustering:
     def train(self, typ, w2v_path, train_df, path, prefix,
               tokenizer=cn.tokenizer, 
               alpha=0.025, min_alpha=0.001, passes=20,
-              model_name='Doc2Vec(dm/c,d100,n5,w5,mc2,t8)', 
+              model_name='dmc', 
               threshold=0.8, 
               cnt_threshold=10, 
               repeat=5,
@@ -308,26 +313,33 @@ class SimilarityClustering:
 #        self.save(path, prefix)#TODO
         
             
-    def save_to_db(self, prefix, collection):
+    def save_to_db(self, prefix, cluster_collection, article_collection, target_time, test=False):
         clusters = []
 
-        time = datetime.datetime.now()
+        time = target_time
         clusters_infors = self.countby_.sort_values('similarity', ascending=False)
 
         prefix = prefix * 1000
+        
+        vec_size = len(self.models_by_name_['dmc'].docvecs)
+        vectors = []
+        for i in range(vec_size):
+            vectors.append(self.dm_.docvecs[i])
 
+        pca = PCA(n_components=100).fit_transform(vectors)
+        
+        article_list = []
         for idx, info in clusters_infors.iterrows():
             new_cluster = prefix + idx
 #            leading = self.getMainArticle(info.cluster).to_dict()
             
-            pca = PCA(n_components=100).fit_transform(self.dm_.docvecs)
-    
             articles = []
             for idx, row in self.df_[self.df_.cluster==info.cluster].iterrows():
                 row_dict = row.to_dict()
                 row_dict['cluster'] = new_cluster
                 row_dict['vector'] = pca[idx].tolist()
                 articles.append(row_dict)
+                article_list.append(row_dict)
             
             cates = {}
             for cate in articles_data.get_target_cate():
@@ -357,6 +369,11 @@ class SimilarityClustering:
                 "articles": articles
             }
             clusters.append(cluster)
-            
+        # end for    
         calced_cluster = calc_issue_rank(clusters)
-        collection.insert_many(calced_cluster)
+        
+        if(not test):
+            cluster_collection.insert_many(calced_cluster)
+            article_collection.insert_many(article_list)
+        
+        return calced_cluster
