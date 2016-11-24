@@ -25,18 +25,20 @@ def is_dirty_article(title, content, min_len = 100):
     return False
 
 def get_dirty_headlines():
-    return [u"경향포토", u"오늘의 날씨"]
+    return [u"경향포토", u"오늘의", u"내일의", u"주말의", u"오늘의 날씨", u"날씨", u"화제의", u"화제의 분양", u"오늘의 경기", u"주말의 경기"]
 
 def get_target_cate():
-    return [u"정치", u"사회", u"경제", u"과학"]
+    # 경제 문화 사회 정치 스포츠 과학 건강
+    # return [u"정치", u"사회", u"경제"]
+    return u'경제 문화 사회 정치 스포츠 과학 건강'.split()
 
-def find_recent_articles(collection, catelist_path, target_time):
+def find_recent_articles(collection, catelist_path, target_time, delta_days=14):
     articles = collection
 
     categories = pd.read_pickle(catelist_path)
 
     article_list = []
-    d = target_time - datetime.timedelta(days=7)
+    d = target_time - datetime.timedelta(days=delta_days)
     for article in articles.find({"publishedAt": {"$gt": d, "$lt": target_time}}).sort("publishedAt"):
         if(not is_dirty_article(article['title'], article['content'])):
             article_list.append(article)
@@ -89,15 +91,15 @@ def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4,
     batchs = [words[i:i + batch_size] for i in xrange(0, len(words), batch_size)]
     print("Number of batchs - %d" % len(batchs))
     
-    # p = Pool(workers)
-    for idx, batch in tqdm(enumerate(batchs)):
+    p = Pool(workers)
+    for idx, batch in enumerate(tqdm(batchs, desc="Tokenizing")):
         t0 = time()
-        # tokens = p.map(tokenizer, batch)
-        tokens = [tokenizer(b) for b in batch]
+        tokens = p.map(tokenizer, batch)
+        #tokens = [tokenizer(b) for b in tqdm(batch, desc="Tokenize batch#%d")]
         f = open("%s/%d"%(target_dir, idx), "w")
         f.write("\n".join(tokens).encode('utf8'))
         f.close()
-        #print("Batch#%d - tokenizer took %f sec"%(idx, time() - t0))
+        print("Batch#%d - tokenizer took %f sec"%(idx, time() - t0))
         
     return len(batchs)
         

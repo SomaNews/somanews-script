@@ -96,11 +96,11 @@ def pos_tags(inp_str):
     return ' '.join(pos_tags_arr(inp_str))
 
 def pos_tags_arr(inp_str):
-    clean_text = text_cleaning(inp_str)
+    clean_text = hanja.translate(inp_str, 'substitution')
+    clean_text = remove_headlines(clean_text)
     pos_tags = mecab.pos(clean_text)
     filtered = filter_special_ch(pos_tags)
-#    return [pt[0] + pt[1] for pt in filtered]
-    return [pt[0] + pt[1] for pt in pos_tags]
+    return [pt[0] + pt[1] for pt in filtered]
 
 def tokenize_syllables(max_n, clean_text):
     split_by_whitespace = clean_text.split(' ')

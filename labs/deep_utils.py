@@ -14,6 +14,7 @@ from tqdm import tqdm
 from time import mktime
 import math
 from datetime import datetime
+from numpy import linalg as LA
 
 def test_print(cluster, df, docvecs, centers, topics, score, threshold, diff_threshold):
     print(score[score.cluster==cluster])
@@ -115,7 +116,7 @@ def similarity_iner_score(centers, df, docvecs, threshold):
 
     return pd.DataFrame(scores, columns = ['cluster', 'cnt', 'portion', 'in_threshold', 'in_ratio', 'time_mean', 'time_v', 'distance', 'variance', 'similarity', 'cohesion'])
 
-def similarity_clustering(df_, docvecs, threshold=0.8, repeat=5):
+def similarity_clustering(df_, docvecs, threshold=0.8, repeat=5, dt_threshold=0.05):
     print("similarity_clustering - threshold:%f"%threshold)
     t0 = time()
     # Initialize
@@ -133,8 +134,19 @@ def similarity_clustering(df_, docvecs, threshold=0.8, repeat=5):
         sd = {}
         p_unique = clu_rank.parent.unique()
         print("Calculate similarity. size:%d"%len(p_unique))
-        for t in tqdm(list(itertools.combinations(p_unique, 2)), desc="Calc similarity"):
-            similarity = cs_similarity(centers[t[0]], centers[t[1]])
+        
+        # Faster similarity compute
+        articleNum = len(p_unique)
+        vlist = [centers[p_unique[i]] for i in xrange(articleNum)]  # vlist
+        vlist = [v / LA.norm(v) for v in vlist]  # normalize
+        npv = np.asarray(vlist)
+        simMatrix = np.dot(npv, npv.transpose())
+            
+        for _t in list(itertools.combinations(range(articleNum), 2)):
+            t = (p_unique[_t[0]], p_unique[_t[1]])
+            similarity = simMatrix[_t[0], _t[1]]
+            if similarity > 1:
+                similarity = 1
             if(similarity >= threshold):
                 sd[t] = similarity
 
@@ -149,10 +161,11 @@ def similarity_clustering(df_, docvecs, threshold=0.8, repeat=5):
         for key, similarity in tqdm(ordered_sd.items()[:-1], desc="Clustering"):
             u_cluster = find(clu_rank, key[0])
             v_cluster = find(clu_rank, key[1])
-            vec_sim = cs_similarity(centers[u_cluster], centers[v_cluster])
-            if(u_cluster != v_cluster and vec_sim >= threshold):
-                cluster = union(clu_rank, u_cluster, v_cluster)
-                centers[cluster] = merge_similarity(centers[u_cluster], centers[v_cluster])
+            if(u_cluster != v_cluster):
+                vec_sim = cs_similarity(centers[u_cluster], centers[v_cluster])
+                if(vec_sim >= threshold):
+                    cluster = union(clu_rank, u_cluster, v_cluster)
+                    centers[cluster] = merge_similarity(centers[u_cluster], centers[v_cluster])
 
         for idx, row in clu_rank.iterrows():
             find(clu_rank, idx)
@@ -170,7 +183,8 @@ def similarity_clustering(df_, docvecs, threshold=0.8, repeat=5):
                 for i, c in cluster.iterrows():
                     center = merge_similarity(center, docvecs[i])
                 centers[p] = center
-                
+          
+        threshold = threshold + dt_threshold
 #        iner_socre(centers, df_, docvecs, threshold, 10)
             
     print("Done in %0.3fs." % (time() - t0))

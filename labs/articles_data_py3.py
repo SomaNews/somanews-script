@@ -7,6 +7,7 @@ from gensim.models import Word2Vec
 import cnouns as cn
 import pickle
 from multiprocessing import Pool
+from pymongo.errors import BulkWriteError
 from time import time
 import ntc_rank
 import re
@@ -44,7 +45,7 @@ def get_dirty_headlines():
     return [u"경향포토", u"오늘의 날씨"]
 
 def get_target_cate():
-    return [u"정치", u"사회", u"경제"]
+    return [u"정치", u"사회", u"경제", u"과학", u"건강"]
 
 def find_recent_articles(collection, catelist_path, target_time):
     articles = collection
@@ -116,15 +117,22 @@ def makeDataset(collection, target_dir, corpus_path, batch_size=5000, workers=4,
         print("Batch#%d - tokenize took %f sec"%(idx, time() - t0))
         
     return len(batchs)
-  
-def save_to_db(train, prefix, collections, cohesions):
+
+def save_to_articles(train, collections):
+    try:
+        collections.insert_many(train.to_dict(orient='records'))
+    except BulkWriteError as bwe:
+        pass
+
+def save_to_clusters(train, prefix, collections, cohesions):
     clusters = []
     time = datetime.datetime.now()
     clusters_infors = [(name, group) for name, group in train.groupby('cluster')]
     prefix = prefix * 1000
     i = 0
+    
     for cluster in clusters_infors:
-        new_cluster = prefix + cluster[0]
+        new_cluster = cluster[0] + prefix
         info = cluster[1].size
 
         articles = []
@@ -141,7 +149,9 @@ def save_to_db(train, prefix, collections, cohesions):
         leading = articles[0]
         for article in articles:
             if article['imageURL'] != '':
-                if((leading['publishedAt'] - article['publishedAt']).total_seconds() > 0):
+                if((article['publishedAt'] - leading['publishedAt']).total_seconds() > 0):
+                    leading = article
+                elif leading['imageURL'] == '':
                     leading = article
 
         cluster = {
@@ -156,5 +166,11 @@ def save_to_db(train, prefix, collections, cohesions):
         clusters.append(cluster)
         i = i+1
 
-    clusters = ntc_rank.calc_issue_rank(clusters)
-    collections.insert_many(clusters)
+    calced_cluster, sort_cdf = ntc_rank.calc_issue_rank(clusters)
+    
+    try:
+        collections.insert_many(calced_cluster)
+        print("Number of clusters is %d"%len(calced_cluster))
+    except BulkWriteError as bwe:
+        pass
+    
